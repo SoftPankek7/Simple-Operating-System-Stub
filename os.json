@@ -1,0 +1,8 @@
+{
+    "bootloader": "src/bootloader.asm",
+    "kernel_entry": "src/main.c",
+    "components": [],
+    "linker_script": "link.ld",
+    "output": "build/os.img",
+    "qemu_args": "-m 32M -display gtk"
+}

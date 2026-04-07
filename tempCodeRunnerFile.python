@@ -1,0 +1,74 @@
+#!/usr/bin/env python3
+# build.py
+
+import os, sys, json, subprocess
+
+CONFIG_FILE = "os.json"
+
+CC    = "i686-elf-gcc"
+LD    = "i686-elf-ld"
+NASM  = "nasm"
+QEMU  = "qemu-system-x86_64"
+CFLAGS = "-ffreestanding -nostdlib -nostdinc -fno-builtin -fno-stack-protector -m32 -O2"
+
+os.makedirs("build", exist_ok=True)
+
+def run(cmd):
+    print(f"$ {cmd}")
+    r = subprocess.run(cmd, shell=True)
+    if r.returncode != 0:
+        print(f"FAILED (exit {r.returncode})")
+        sys.exit(r.returncode)
+
+def load_config():
+    with open(CONFIG_FILE) as f:
+        # strip // comments so the json is friendlier to edit
+        lines = [l for l in f if not l.strip().startswith("//")]
+        return json.loads("\n".join(lines))
+
+def build():
+    cfg = load_config()
+
+    run(f"{NASM} -f bin {cfg['bootloader']} -o build/bootloader.bin")  # fix
+
+    sources = [cfg["kernel_entry"]] + cfg.get("components", [])
+    objects = []
+    for src in sources:
+        obj = "build/" + src.replace("/", "_").replace(".c", ".o")
+        run(f"{CC} {CFLAGS} -c {src} -o {obj}")
+        objects.append(obj)
+
+    obj_list = " ".join(objects)
+    run(f"{LD} -T {cfg['linker_script']} -o build/kernel.bin --oformat binary {obj_list}")  # fix
+
+    with open("build/bootloader.bin", "rb") as f: boot = f.read()  # fix
+    with open("build/kernel.bin",     "rb") as f: kern = f.read()  # fix
+    img = boot + kern
+    img += b'\x00' * ((-len(img)) % 512)
+
+    out = cfg["output"]
+    with open(out, "wb") as f: f.write(img)
+    print(f"=> {out}")
+
+def clean():
+    import shutil
+    shutil.rmtree("build", ignore_errors=True)  # fix — just nuke the whole dir
+    os.makedirs("build", exist_ok=True)
+    print("cleaned build/")
+
+def run_qemu():
+    cfg = load_config()
+    run(f"{QEMU} -drive format=raw,file={cfg['output']} {cfg['qemu_args']}")
+
+def debug():
+    cfg = load_config()
+    run(f"{QEMU} -drive format=raw,file={cfg['output']} {cfg['qemu_args']} -s -S")
+
+cmds = {"build": build, "run": run_qemu, "debug": debug, "clean": clean}
+
+if __name__ == "__main__":
+    cmd = sys.argv[1] if len(sys.argv) > 1 else "build"
+    if cmd not in cmds:
+        print(f"usage: build.py [{'/'.join(cmds)}]")
+        sys.exit(1)
+    cmds[cmd]()
